@@ -163,6 +163,10 @@ class JsonDatasetWriter:
 
         Caller is responsible for opening and closing the handle.
         """
+        if not lines and len(self.dataset) == 0:
+            # An empty JSON document still needs the container and any schema metadata.
+            return file_obj.write(self._batch_json((0, orient, lines, to_json_kwargs)))
+
         written = 0
 
         if self.num_proc is None or self.num_proc == 1:

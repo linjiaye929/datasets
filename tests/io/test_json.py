@@ -205,6 +205,52 @@ def load_json_lines(buffer):
 
 
 class TestJsonDatasetWriter:
+    @pytest.mark.parametrize("orient", ["records", "split", "index", "columns", "values", "table"])
+    @pytest.mark.parametrize("num_proc", [None, 1, 2])
+    @pytest.mark.parametrize("empty_source", ["typed", "selected", "filtered"])
+    def test_dataset_to_json_empty(self, orient, num_proc, empty_source):
+        features = Features({"text": Value("string"), "label": Value("int64")})
+        if empty_source == "typed":
+            dataset = Dataset.from_dict({"text": [], "label": []}, features=features)
+        else:
+            dataset = Dataset.from_dict({"text": ["hello"], "label": [1]}, features=features)
+            dataset = dataset.select([]) if empty_source == "selected" else dataset.filter(lambda row: False)
+        options = {"orient": orient, "lines": False}
+        if orient in ["split", "table"]:
+            options["index"] = False
+        expected = json.loads(dataset.to_pandas().to_json(**options))
+
+        with io.BytesIO() as buffer:
+            written = dataset.to_json(buffer, orient=orient, lines=False, num_proc=num_proc)
+            exported_content = buffer.getvalue()
+
+        assert json.loads(exported_content) == expected
+        assert written == len(exported_content) > 0
+
+    @pytest.mark.parametrize("num_proc", [None, 1, 2])
+    def test_dataset_to_json_empty_lines(self, num_proc):
+        dataset = Dataset.from_dict({"text": []}, features=Features({"text": Value("string")}))
+        with io.BytesIO() as buffer:
+            assert dataset.to_json(buffer, num_proc=num_proc) == 0
+            assert buffer.getvalue() == b""
+
+    @pytest.mark.parametrize("extension", ["json", "json.gz", "json.bz2", "json.xz"])
+    def test_dataset_to_json_empty_path(self, extension, tmp_path):
+        dataset = Dataset.from_dict({"text": []}, features=Features({"text": Value("string")}))
+        path = tmp_path / f"empty.{extension}"
+        written = dataset.to_json(path, lines=False)
+        with fsspec.open(path, "rb", compression="infer") as buffer:
+            exported_content = buffer.read()
+        assert json.loads(exported_content) == []
+        assert written == len(exported_content) > 0
+
+    @pytest.mark.parametrize("options", [{"orient": "invalid"}, {"orient": "records", "index": True}])
+    def test_dataset_to_json_empty_validates_options(self, options):
+        dataset = Dataset.from_dict({"text": []}, features=Features({"text": Value("string")}))
+        with io.BytesIO() as buffer:
+            with pytest.raises(ValueError):
+                dataset.to_json(buffer, lines=False, **options)
+
     @pytest.mark.parametrize("lines, load_json_function", [(True, load_json_lines), (False, load_json)])
     def test_dataset_to_json_lines(self, lines, load_json_function, dataset):
         with io.BytesIO() as buffer:
